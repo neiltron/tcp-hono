@@ -31,6 +31,27 @@ Hello, Hono!
 > [!WARNING]
 > This is experimental. The API may change. It is not published to npm yet.
 
+## Tiny
+
+The core is about **200 lines** in four files. Everything else is Hono itself.
+
+| File                                   | Lines | Role                                                   |
+| -------------------------------------- | ----: | ------------------------------------------------------ |
+| [`src/hono.ts`](./src/hono.ts)         |    23 | The preset                                             |
+| [`src/router.ts`](./src/router.ts)     |    31 | `TCPRouter`, which delegates matching to a Hono router |
+| [`src/get-path.ts`](./src/get-path.ts) |    53 | A TCP message to a `Request`, and `getPath`            |
+| [`src/tcp.ts`](./src/tcp.ts)           |    92 | The loop that reads messages and writes responses      |
+
+The size of each entry point, without `hono`:
+
+| Entry            | Contents                                   | Minified | Minified + gzip |
+| ---------------- | ------------------------------------------ | -------: | --------------: |
+| `tcp-hono`       | Preset, router, adapter, and Line protocol |   2.6 kB |          1.4 kB |
+| `tcp-hono/resp`  | RESP protocol and renderer                 |   2.5 kB |          1.3 kB |
+| `tcp-hono/whois` | WHOIS protocol and renderer                |   1.2 kB |          0.7 kB |
+
+It is small because it adds nothing to Hono. A message becomes a path, and Hono's router matches it. A message becomes a `Request`, and `app.fetch()` handles it. So `c.req.param()`, Validator, `c.render()`, and Middleware work without any change.
+
 ## How it works
 
 1. A **Protocol** cuts out messages from the byte stream. `HELLO Hono` becomes the arguments `['HELLO', 'Hono']`.
