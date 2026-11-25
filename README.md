@@ -29,7 +29,13 @@ Hello, Hono!
 ```
 
 > [!WARNING]
-> This is experimental. The API may change. It is not published to npm yet.
+> This is experimental. The API may change.
+
+## Install
+
+```sh
+npm i tcp-hono hono
+```
 
 ## Tiny
 
