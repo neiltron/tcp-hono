@@ -1,0 +1,15 @@
+packages:
+  - examples/*
+
+overrides:
+  vite: npm:@voidzero-dev/vite-plus-core@8.3.8001
+  vitest: 5.1.1
+
+allowBuilds:
+  esbuild: true
+  workerd: true
+  sharp: true
+
+minimumReleaseAgeExclude:
+  - cf@1.0.0-rc.6
+  - hono@4.13.22

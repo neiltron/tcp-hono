@@ -1,0 +1,41 @@
+{
+  "name": "tcp-hono",
+  "version": "0.0.0",
+  "description": "Hono beyond HTTP - Preset and Adapters to use Hono as a TCP server",
+  "license": "MIT",
+  "author": "Yusuke Wada <https://github.com/yusukebe>",
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "exports": {
+    ".": "./dist/index.js",
+    "./resp": "./dist/protocols/resp/index.js",
+    "./whois": "./dist/protocols/whois/index.js",
+    "./node": "./dist/adapter/node/index.js"
+  },
+  "scripts": {
+    "build": "vp pack",
+    "test": "vp test run",
+    "check": "vp check",
+    "format": "vp fmt",
+    "lint": "vp lint"
+  },
+  "devDependencies": {
+    "@hono/standard-validator": "^0.4.1",
+    "@types/node": "^24.0.0",
+    "hono": "^4.13.22",
+    "typescript": "^7.0.2",
+    "valibot": "^1.5.0",
+    "vite": "npm:@voidzero-dev/vite-plus-core@8.3.8001",
+    "vite-plus": "1.8.0",
+    "vitest": "5.1.1"
+  },
+  "peerDependencies": {
+    "hono": "^4.0.0"
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "packageManager": "pnpm@11.24.0"
+}
