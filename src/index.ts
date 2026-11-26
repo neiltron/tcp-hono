@@ -1,6 +1,7 @@
 export { Hono } from './hono.ts'
 export { tcp } from './tcp.ts'
+export { getConnection } from './get-path.ts'
 export { TCPRouter } from './router.ts'
 export { line } from './protocols/line/index.ts'
 export type { LineOptions } from './protocols/line/index.ts'
-export type { Decoder, Message, Protocol, Socket, TCPOptions } from './types.ts'
+export type { Connection, Decoder, Message, Protocol, Socket, TCPOptions } from './types.ts'

@@ -39,14 +39,14 @@ npm i tcp-hono hono
 
 ## Tiny
 
-The core is about **200 lines** in four files. Everything else is Hono itself.
+The core is about **280 lines** in four files. Everything else is Hono itself.
 
 | File                                   | Lines | Role                                                   |
 | -------------------------------------- | ----: | ------------------------------------------------------ |
 | [`src/hono.ts`](./src/hono.ts)         |    23 | The preset                                             |
 | [`src/router.ts`](./src/router.ts)     |    31 | `TCPRouter`, which delegates matching to a Hono router |
-| [`src/get-path.ts`](./src/get-path.ts) |    53 | A TCP message to a `Request`, and `getPath`            |
-| [`src/tcp.ts`](./src/tcp.ts)           |    92 | The loop that reads messages and writes responses      |
+| [`src/get-path.ts`](./src/get-path.ts) |    74 | A TCP message to a `Request`, and `getPath`            |
+| [`src/tcp.ts`](./src/tcp.ts)           |   152 | The loop that reads messages and writes responses      |
 
 The size of each entry point, without `hono`:
 
@@ -190,6 +190,25 @@ export default tcp(app, { protocol: resp() })
 
 Responses that are not created by `c.render()` are also converted so that the client does not get broken: Not Found becomes `-ERR unknown command`, the other error responses become an error with the body as the message, and the rest become a bulk string.
 
+### IRC
+
+[Modern IRC](https://modern.ircdocs.horse/) with [message tags](https://ircv3.net/specs/extensions/message-tags). The command is uppercased and the parameters follow it, so `PRIVMSG #hono :Hello World` is routed as `/PRIVMSG/#hono/Hello World`. The whole line is available as the body.
+
+```ts
+import { Hono, tcp } from 'tcp-hono'
+import { format, irc } from 'tcp-hono/irc'
+
+const app = new Hono()
+
+app.on('TCP', '/PING/:token', (c) => {
+  return c.text(format({ command: 'PONG', params: [c.req.param('token')] }))
+})
+
+export default tcp(app, { protocol: irc() })
+```
+
+`parse()` and `format()` convert a line from and to `{ tags, source, command, params }`. Use `parse(await c.req.text())` for what a path can not express, such as the tags or an empty parameter. IRC is not a request/response protocol, so most of the output is written with [Server push](#server-push). A response without a body, such as `c.body(null)`, writes nothing.
+
 ### Closing the connection
 
 Set the `Connection: close` header. The connection is closed after the response is written.
@@ -228,6 +247,43 @@ Connection handling:
 - The next message is not processed until the response has been written to the socket. A streaming body, such as `c.body(readableStream)`, is piped with backpressure.
 - When the client half-closes, the remaining responses are sent, and then the connection is closed.
 - If a message is malformed or exceeds the size limit, an error is sent and the connection is closed.
+
+## Server push
+
+A response is written only for a message. To write to a socket at any other time, such as Pub/Sub, a chat, or a greeting, use the connection.
+
+```ts
+import { Hono, getConnection, tcp } from 'tcp-hono'
+import type { Connection } from 'tcp-hono'
+
+const app = new Hono()
+const subscribers = new Set<Connection>()
+
+app.on('TCP', '/SUBSCRIBE', (c) => {
+  subscribers.add(getConnection(c))
+  return c.text('OK')
+})
+
+app.on('TCP', '/PUBLISH/:message', (c) => {
+  for (const subscriber of subscribers) {
+    subscriber.send(`MESSAGE ${c.req.param('message')}\n`)
+  }
+  return c.text(String(subscribers.size))
+})
+
+export default tcp(app, {
+  onOpen: (connection) => connection.send('Welcome!\n'),
+  onClose: (connection) => void subscribers.delete(connection),
+})
+```
+
+- `getConnection(c)` returns the `Connection` that the message came from. It has `send(data)`, `close()`, and `closed`.
+- `onOpen` is called before the first message is read, and `onClose` is called once when either side closes the connection.
+- `send()` takes a string or a `Uint8Array` and writes it as is. `respond()` of the protocol is not applied.
+- The data is queued and written in order. It is not interleaved with a response, even a streaming one. The data sent in a handler is written before the response of the handler.
+- `send()` does not wait for the client. If more than `maxBufferedBytes` (1 MiB by default) is waiting to be written, the client is disconnected.
+
+The connections must live in the same isolate to reach each other. On Cloudflare Workers, hold them in a Durable Object. See [examples/irc](./examples/irc).
 
 ## Renderer types
 
@@ -282,6 +338,7 @@ export default defineConfig({
 
 - [examples/hello](./examples/hello) - HTTP and TCP on the same app. Cloudflare Workers and Node.js.
 - [examples/github-whois](./examples/github-whois) - A WHOIS server that returns the information of a GitHub repository.
+- [examples/irc](./examples/irc) - An IRC server on a Durable Object, with a part of IRCv3. It also runs on Node.js.
 - [examples/redis](./examples/redis) - A Redis-compatible server backed by Durable Objects. It listens on 6380 so that it does not conflict with a real Redis. It has no authentication, so use it locally or restrict the source addresses.
 
 ```sh
@@ -300,7 +357,6 @@ The examples use the [`cf` CLI](https://developers.cloudflare.com/cf/) and the C
 - An empty argument, such as `SET foo ""`, does not match a path parameter, the same as an empty path segment in HTTP. It results in Not Found.
 - Path parameters are strings decoded as UTF-8. Use the body for binary data.
 - There is no idle timeout and no limit on the number of connections.
-- Server push, such as Pub/Sub, is not supported. A response is written only for a message.
 
 ## Development
 

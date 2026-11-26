@@ -1,0 +1,24 @@
+{
+  "name": "tcp-hono-example-irc",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "cf dev",
+    "dev:node": "node src/node.ts",
+    "build": "cf build",
+    "deploy": "cf deploy",
+    "typecheck": "cf workers types && tsc --noEmit"
+  },
+  "dependencies": {
+    "hono": "^4.13.22",
+    "tcp-hono": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "^2.0.0-rc.5",
+    "@types/node": "^24.0.0",
+    "cf": "^1.0.0-rc.6",
+    "typescript": "^7.0.2",
+    "vite": "npm:@voidzero-dev/vite-plus-core@8.3.8001",
+    "vite-plus": "1.8.0"
+  }
+}

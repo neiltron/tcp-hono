@@ -6,6 +6,7 @@ export default defineConfig({
       index: 'src/index.ts',
       'protocols/resp/index': 'src/protocols/resp/index.ts',
       'protocols/whois/index': 'src/protocols/whois/index.ts',
+      'protocols/irc/index': 'src/protocols/irc/index.ts',
       'adapter/node/index': 'src/adapter/node/index.ts',
     },
     format: 'esm',

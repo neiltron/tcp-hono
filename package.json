@@ -5,6 +5,7 @@
   "keywords": [
     "cloudflare-workers",
     "hono",
+    "irc",
     "redis",
     "resp",
     "tcp",
@@ -26,6 +27,7 @@
     ".": "./dist/index.js",
     "./resp": "./dist/protocols/resp/index.js",
     "./whois": "./dist/protocols/whois/index.js",
+    "./irc": "./dist/protocols/irc/index.js",
     "./node": "./dist/adapter/node/index.js"
   },
   "publishConfig": {
