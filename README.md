@@ -39,14 +39,14 @@ npm i tcp-hono hono
 
 ## Tiny
 
-The core is about **200 lines** in four files. Everything else is Hono itself.
+The core is about **280 lines** in four files. Everything else is Hono itself.
 
 | File                                   | Lines | Role                                                   |
 | -------------------------------------- | ----: | ------------------------------------------------------ |
 | [`src/hono.ts`](./src/hono.ts)         |    23 | The preset                                             |
 | [`src/router.ts`](./src/router.ts)     |    31 | `TCPRouter`, which delegates matching to a Hono router |
-| [`src/get-path.ts`](./src/get-path.ts) |    53 | A TCP message to a `Request`, and `getPath`            |
-| [`src/tcp.ts`](./src/tcp.ts)           |    92 | The loop that reads messages and writes responses      |
+| [`src/get-path.ts`](./src/get-path.ts) |    74 | A TCP message to a `Request`, and `getPath`            |
+| [`src/tcp.ts`](./src/tcp.ts)           |   152 | The loop that reads messages and writes responses      |
 
 The size of each entry point, without `hono`:
 
@@ -229,6 +229,43 @@ Connection handling:
 - When the client half-closes, the remaining responses are sent, and then the connection is closed.
 - If a message is malformed or exceeds the size limit, an error is sent and the connection is closed.
 
+## Server push
+
+A response is written only for a message. To write to a socket at any other time, such as Pub/Sub, a chat, or a greeting, use the connection.
+
+```ts
+import { Hono, getConnection, tcp } from 'tcp-hono'
+import type { Connection } from 'tcp-hono'
+
+const app = new Hono()
+const subscribers = new Set<Connection>()
+
+app.on('TCP', '/SUBSCRIBE', (c) => {
+  subscribers.add(getConnection(c))
+  return c.text('OK')
+})
+
+app.on('TCP', '/PUBLISH/:message', (c) => {
+  for (const subscriber of subscribers) {
+    subscriber.send(`MESSAGE ${c.req.param('message')}\n`)
+  }
+  return c.text(String(subscribers.size))
+})
+
+export default tcp(app, {
+  onOpen: (connection) => connection.send('Welcome!\n'),
+  onClose: (connection) => void subscribers.delete(connection),
+})
+```
+
+- `getConnection(c)` returns the `Connection` that the message came from. It has `send(data)`, `close()`, and `closed`.
+- `onOpen` is called before the first message is read, and `onClose` is called once when either side closes the connection.
+- `send()` takes a string or a `Uint8Array` and writes it as is. `respond()` of the protocol is not applied.
+- The data is queued and written in order. It is not interleaved with a response, even a streaming one. The data sent in a handler is written before the response of the handler.
+- `send()` does not wait for the client. If more than `maxBufferedBytes` (1 MiB by default) is waiting to be written, the client is disconnected.
+
+The connections must live in the same isolate to reach each other. On Cloudflare Workers, hold them in a Durable Object: pipe the socket of the `connect()` handler of the Worker to the `connect()` handler of the object, and call `tcp.socket(app, options)` there.
+
 ## Renderer types
 
 The renderers add a call signature to `ContextRenderer` of Hono, in the same way as the JSX Renderer. The signatures are merged as overloads, so `tcp-hono/resp`, `tcp-hono/whois`, and your own HTTP renderer can live in the same project.
@@ -300,7 +337,6 @@ The examples use the [`cf` CLI](https://developers.cloudflare.com/cf/) and the C
 - An empty argument, such as `SET foo ""`, does not match a path parameter, the same as an empty path segment in HTTP. It results in Not Found.
 - Path parameters are strings decoded as UTF-8. Use the body for binary data.
 - There is no idle timeout and no limit on the number of connections.
-- Server push, such as Pub/Sub, is not supported. A response is written only for a message.
 
 ## Development
 

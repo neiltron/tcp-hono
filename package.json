@@ -33,6 +33,7 @@
   },
   "scripts": {
     "build": "vp pack",
+    "prepare": "vp pack",
     "test": "vp test run",
     "check": "vp check",
     "format": "vp fmt",

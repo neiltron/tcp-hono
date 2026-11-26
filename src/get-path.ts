@@ -1,4 +1,4 @@
-import type { Message } from './types.ts'
+import type { Connection, Message } from './types.ts'
 
 export const METHOD_NAME_TCP = 'TCP'
 
@@ -16,10 +16,12 @@ export const PATH_BLOCKED = '\0'
  */
 class TCPRequest extends Request {
   path: string
+  connection?: Connection
 
-  constructor(path: string, body?: Uint8Array) {
+  constructor(path: string, body?: Uint8Array, connection?: Connection) {
     super(`tcp://localhost${path}`, { method: 'POST', body: body as Uint8Array<ArrayBuffer> })
     this.path = path
+    this.connection = connection
   }
 
   get method() {
@@ -33,8 +35,27 @@ class TCPRequest extends Request {
  * Each argument is percent-encoded and becomes a path segment,
  * so `c.req.param()` returns the original value even if it contains spaces, slashes, or `%`.
  */
-export const createRequest = (message: Message): Request =>
-  new TCPRequest('/' + message.args.map(encodeURIComponent).join('/'), message.body)
+export const createRequest = (message: Message, connection?: Connection): Request =>
+  new TCPRequest('/' + message.args.map(encodeURIComponent).join('/'), message.body, connection)
+
+/**
+ * Get the connection that the message came from.
+ *
+ * @example
+ * ```ts
+ * app.on('TCP', '/SUBSCRIBE', (c) => {
+ *   subscribers.add(getConnection(c))
+ *   return c.text('OK')
+ * })
+ * ```
+ */
+export const getConnection = (c: { req: { raw: Request } }): Connection => {
+  const connection = c.req.raw instanceof TCPRequest ? c.req.raw.connection : undefined
+  if (!connection) {
+    throw new Error('The request does not come from a TCP connection')
+  }
+  return connection
+}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type GetPath = (request: Request, options?: { env?: any }) => string
