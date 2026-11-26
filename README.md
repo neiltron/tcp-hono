@@ -39,14 +39,14 @@ npm i tcp-hono hono
 
 ## Tiny
 
-The core is about **280 lines** in four files. Everything else is Hono itself.
+The core is about **300 lines** in four files. Everything else is Hono itself.
 
 | File                                   | Lines | Role                                                   |
 | -------------------------------------- | ----: | ------------------------------------------------------ |
 | [`src/hono.ts`](./src/hono.ts)         |    23 | The preset                                             |
 | [`src/router.ts`](./src/router.ts)     |    31 | `TCPRouter`, which delegates matching to a Hono router |
 | [`src/get-path.ts`](./src/get-path.ts) |    74 | A TCP message to a `Request`, and `getPath`            |
-| [`src/tcp.ts`](./src/tcp.ts)           |   152 | The loop that reads messages and writes responses      |
+| [`src/tcp.ts`](./src/tcp.ts)           |   173 | The loop that reads messages and writes responses      |
 
 The size of each entry point, without `hono`:
 
@@ -233,6 +233,8 @@ Connection handling:
 
 A response is written only for a message. To write to a socket at any other time, such as Pub/Sub, a chat, or a greeting, use the connection.
 
+A connection can only be reached from the same isolate. This example works across connections on Node.js. On Cloudflare Workers, run it in a Durable Object, as described below.
+
 ```ts
 import { Hono, getConnection, tcp } from 'tcp-hono'
 import type { Connection } from 'tcp-hono'
@@ -259,12 +261,15 @@ export default tcp(app, {
 ```
 
 - `getConnection(c)` returns the `Connection` that the message came from. It has `send(data)`, `close()`, and `closed`.
-- `onOpen` is called before the first message is read, and `onClose` is called once when either side closes the connection.
-- `send()` takes a string or a `Uint8Array` and writes it as is. `respond()` of the protocol is not applied.
+- `onOpen` is called before the first message is read, and `onClose` is called once when either side closes the connection, even if `onOpen` has thrown.
+- A disconnect is noticed when the server next reads from the socket, so `onClose` waits for a pending handler.
+- `send()` takes a string or a `Uint8Array` and writes it as is. `respond()` of the protocol is not applied. The `Uint8Array` is not copied, so do not change it after passing it.
 - The data is queued and written in order. It is not interleaved with a response, even a streaming one. The data sent in a handler is written before the response of the handler.
-- `send()` does not wait for the client. If more than `maxBufferedBytes` (1 MiB by default) is waiting to be written, the client is disconnected.
+- So a response that streams or idles for a long time holds back the data sent meanwhile, and that data counts toward `maxBufferedBytes`.
+- `send()` does not wait for the client. If more than `maxBufferedBytes` (1 MiB by default) is waiting to be written, the client is disconnected. A single message larger than that is still written.
+- `close()` closes the connection after the queued data and the response of the current handler are written.
 
-The connections must live in the same isolate to reach each other. On Cloudflare Workers, hold them in a Durable Object: pipe the socket of the `connect()` handler of the Worker to the `connect()` handler of the object, and call `tcp.socket(app, options)` there.
+The connections must live in the same isolate to reach each other. On Cloudflare Workers, this means a Durable Object: the top-level `export default tcp(app, ...)` above can not write to another connection. Hold the connections in a Durable Object instead: pipe the socket of the `connect()` handler of the Worker to the `connect()` handler of the object, and call `tcp.socket(app, options)` there.
 
 ## Renderer types
 

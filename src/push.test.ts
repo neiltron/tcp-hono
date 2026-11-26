@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vite-plus/test'
 import { Hono, getConnection, tcp } from './index.ts'
 import type { Connection } from './index.ts'
-import { createSocket } from './test-utils.ts'
+import { createSocket, listen, sendText } from './test-utils.ts'
 
 const decoder = new TextDecoder()
 
@@ -167,5 +167,106 @@ describe('Server push', () => {
     app.get('/', (c) => c.text(String(getConnection(c).closed)))
     const res = await app.request('/')
     expect(res.status).toBe(500)
+  })
+
+  it('Should write the response of a handler that closes the connection', async () => {
+    const app = new Hono()
+    app.on('TCP', '/QUIT', (c) => {
+      getConnection(c).close()
+      return c.text('Bye')
+    })
+    app.on('TCP', '/PING', (c) => c.text('PONG'))
+    // Over a real socket: on Node.js, canceling the reader destroys the socket.
+    const { server, port } = await listen(app)
+    expect(await sendText(port, ['QUIT\nPING\n'])).toBe('Bye\n')
+    server.close()
+  })
+
+  it('Should call onClose on close() even if the client does not read', async () => {
+    let connection: Connection | undefined
+    let closed = 0
+    const client = createSocket()
+    const done = tcp.socket(new Hono(), {
+      onOpen: (c) => void (connection = c),
+      onClose: () => void closed++,
+    })(client.socket)
+    await new Promise((r) => setTimeout(r, 10))
+    // Nobody reads the socket, so this write is pending.
+    connection!.send('Bye\n')
+    connection!.close()
+    await new Promise((r) => setTimeout(r, 10))
+    expect(closed).toBe(1)
+    expect(await client.text()).toBe('Bye\n')
+    await done
+    expect(closed).toBe(1)
+  })
+
+  it('Should disconnect a slow client while a response never ends', async () => {
+    let connection: Connection | undefined
+    let closed = 0
+    const app = new Hono()
+    app.on('TCP', '/WAIT', (c) => {
+      connection = getConnection(c)
+      return c.body(new ReadableStream<Uint8Array>())
+    })
+    const client = createSocket()
+    const done = tcp.socket(app, {
+      maxBufferedBytes: 1024,
+      onClose: () => void closed++,
+    })(client.socket)
+    const received = client.bytes().catch(() => undefined)
+    void client.write('WAIT\n')
+    await new Promise((r) => setTimeout(r, 10))
+    for (let i = 0; i < 3; i++) {
+      connection!.send(new Uint8Array(512))
+    }
+    await done
+    await received
+    expect(closed).toBe(1)
+    expect(client.closed).toBe(true)
+  })
+
+  it('Should write a single message larger than maxBufferedBytes', async () => {
+    let connection: Connection | undefined
+    const client = createSocket()
+    const done = tcp.socket(new Hono(), {
+      maxBufferedBytes: 1024,
+      onOpen: (c) => void (connection = c),
+    })(client.socket)
+    const received = client.bytes()
+    await new Promise((r) => setTimeout(r, 10))
+    connection!.send(new Uint8Array(4096))
+    expect(connection!.closed).toBe(false)
+    void client.end()
+    expect((await received).length).toBe(4096)
+    await done
+  })
+
+  it('Should call onClose even if onOpen throws', async () => {
+    const events: string[] = []
+    const client = createSocket()
+    const done = tcp.socket(new Hono(), {
+      onOpen: () => {
+        events.push('open')
+        throw new Error('onOpen')
+      },
+      onClose: () => void events.push('close'),
+    })(client.socket)
+    expect(await client.text()).toBe('')
+    await done
+    expect(events).toEqual(['open', 'close'])
+  })
+
+  it('Should close the socket even if onClose throws', async () => {
+    const client = createSocket()
+    const done = tcp.socket(new Hono(), {
+      onClose: () => {
+        throw new Error('onClose')
+      },
+    })(client.socket)
+    void client.end()
+    expect(await client.text()).toBe('')
+    await done
+    expect(client.closed).toBe(true)
   })
 })

@@ -22,7 +22,6 @@ const socket = (app: App, options: TCPOptions = {}): SocketHandler => {
     const writer = socket.writable.getWriter()
 
     let closed = false
-    let opened = false
     let buffered = 0
     let queue: Promise<unknown> = Promise.resolve()
 
@@ -33,10 +32,29 @@ const socket = (app: App, options: TCPOptions = {}): SocketHandler => {
       return result
     }
 
-    // Stop reading. A pending `read()` is resolved and the loop ends.
+    // `close()` wakes the loop from a pending read without canceling the reader,
+    // because canceling it destroys the whole socket on Node.js before the queued data is written.
+    let wake = noop
+    const read = () =>
+      new Promise<ReadableStreamReadResult<Uint8Array>>((resolve, reject) => {
+        wake = () => resolve({ done: true, value: undefined })
+        reader.read().then(resolve, reject)
+      })
+
+    // The body of the response being written, which may never end.
+    let body: ReadableStreamDefaultReader<Uint8Array> | undefined
+
+    // Disconnect at once. Give up the response being written, and close the socket
+    // so that a write waiting for the client ends, then the loop and `onClose` follow.
     const stop = () => {
       closed = true
-      void reader.cancel().catch(noop)
+      wake()
+      void body?.cancel().catch(noop)
+      void writer.abort().catch(noop)
+      // In a promise, because `close()` may throw when called from another request on Workers.
+      void Promise.resolve()
+        .then(() => socket.close())
+        .catch(noop)
     }
 
     const connection: Connection = {
@@ -46,10 +64,10 @@ const socket = (app: App, options: TCPOptions = {}): SocketHandler => {
         }
         const bytes = typeof data === 'string' ? encode(data) : data
         buffered += bytes.length
-        if (buffered > maxBufferedBytes) {
+        // A single large message is not a sign of a slow client, so only the data queued before it counts.
+        if (buffered > maxBufferedBytes && buffered > bytes.length) {
           // The client does not read. Give up the queued data so that it does not use up the memory.
           stop()
-          void writer.abort().catch(noop)
           return
         }
         void enqueue(() => writer.write(bytes))
@@ -58,8 +76,9 @@ const socket = (app: App, options: TCPOptions = {}): SocketHandler => {
       },
       close: () => {
         if (!closed) {
+          // The loop ends, and the queued data is written before the socket is closed.
           closed = true
-          void enqueue(() => reader.cancel()).catch(noop)
+          wake()
         }
       },
       get closed() {
@@ -70,10 +89,11 @@ const socket = (app: App, options: TCPOptions = {}): SocketHandler => {
     const send = async (res: Response, message?: Message) => {
       res = protocol.respond ? await protocol.respond(res, message) : res
       if (res.body) {
-        const body = res.body.getReader()
+        const current = res.body.getReader()
         await enqueue(async () => {
+          body = current
           for (;;) {
-            const { value, done } = await body.read()
+            const { value, done } = await current.read()
             if (done) {
               break
             }
@@ -87,10 +107,9 @@ const socket = (app: App, options: TCPOptions = {}): SocketHandler => {
 
     try {
       await options.onOpen?.(connection)
-      opened = true
-      loop: for (;;) {
+      loop: while (!closed) {
         // The next chunk is not read until all the messages in the current chunk are processed.
-        const { value, done } = await reader.read()
+        const { value, done } = await read()
         if (closed) {
           break
         }
@@ -118,9 +137,11 @@ const socket = (app: App, options: TCPOptions = {}): SocketHandler => {
       // The client has gone.
     } finally {
       closed = true
-      if (opened) {
-        await Promise.resolve(options.onClose?.(connection)).catch(noop)
-      }
+      // Called even if `onOpen` has thrown, so that it can undo what `onOpen` has done.
+      // In a promise, so that an error thrown by `onClose` does not skip closing the socket.
+      await Promise.resolve()
+        .then(() => options.onClose?.(connection))
+        .catch(noop)
       // Wait for the queued data, and close the writable side first to flush it.
       await queue
       await writer.close().catch(noop)
